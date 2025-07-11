@@ -1,0 +1,4 @@
+lnd/
+lnurl-server/data/
+
+.DS_Store

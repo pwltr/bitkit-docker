@@ -56,6 +56,16 @@ db.serialize(() => {
     comment_allowed INTEGER DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
+
+  db.run(`CREATE TABLE IF NOT EXISTS channel_requests (
+    id TEXT PRIMARY KEY,
+    k1 TEXT UNIQUE,
+    remote_id TEXT,
+    private BOOLEAN DEFAULT 0,
+    cancelled BOOLEAN DEFAULT 0,
+    completed BOOLEAN DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
 });
 
 // Bitcoin RPC helper
@@ -172,6 +182,22 @@ async function callLND(method, params = {}) {
   }
 }
 
+// Get LND node URI for channel requests
+async function getNodeURI() {
+  try {
+    const nodeInfo = await callLND('getinfo');
+    const address = nodeInfo.uris && nodeInfo.uris.length > 0 ? nodeInfo.uris[0] : null;
+
+    if (!address) {
+      throw new Error('No public URI available for this node');
+    }
+
+    return address;
+  } catch (error) {
+    console.error('Failed to get node URI:', error.message);
+    throw error;
+  }
+}
 
 
 // Health check to verify connections
@@ -245,6 +271,71 @@ app.get('/withdraw', async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ status: 'ERROR', reason: error.message });
+  }
+});
+
+// LNURL-channel endpoint
+app.get('/channel', async (req, res) => {
+  try {
+    const k1 = crypto.randomBytes(32).toString('hex');
+    const channelId = crypto.randomBytes(16).toString('hex');
+
+    // Store channel request
+    db.run(
+      'INSERT INTO channel_requests (id, k1) VALUES (?, ?)',
+      [channelId, k1]
+    );
+
+    // Get node URI
+    const uri = await getNodeURI();
+    const callbackUrl = `${DOMAIN}/channel/callback?k1=${k1}`;
+
+    res.json({
+      tag: 'channelRequest',
+      uri: uri,
+      callback: callbackUrl,
+      k1: k1
+    });
+  } catch (error) {
+    console.error('Channel request error:', error);
+    res.status(500).json({ status: 'ERROR', reason: error.message });
+  }
+});
+
+// LNURL-channel callback
+app.get('/channel/callback', async (req, res) => {
+  try {
+    const { k1, remoteid, private: isPrivate, cancel } = req.query;
+
+    // Verify k1 exists and hasn't been used
+    db.get('SELECT * FROM channel_requests WHERE k1 = ? AND completed = 0 AND cancelled = 0', [k1], (err, row) => {
+      if (err || !row) {
+        return res.json({ status: 'ERROR', reason: 'Invalid or used k1' });
+      }
+
+      if (cancel === '1') {
+        // User cancelled the channel request
+        db.run('UPDATE channel_requests SET cancelled = 1 WHERE k1 = ?', [k1]);
+        console.log(`Channel request cancelled: k1=${k1}`);
+        return res.json({ status: 'OK' });
+      }
+
+      if (!remoteid) {
+        return res.json({ status: 'ERROR', reason: 'Missing remoteid parameter' });
+      }
+
+      // Store the remote node ID and private flag
+      const privateFlag = isPrivate === '1' ? 1 : 0;
+      db.run('UPDATE channel_requests SET remote_id = ?, private = ? WHERE k1 = ?', [remoteid, privateFlag, k1]);
+
+      console.log(`Channel request initiated: k1=${k1}, remoteid=${remoteid}, private=${privateFlag}`);
+
+      // The wallet should now wait for an incoming OpenChannel message from our node
+      res.json({ status: 'OK' });
+    });
+  } catch (error) {
+    console.error('Channel callback error:', error);
+    res.json({ status: 'ERROR', reason: error.message });
   }
 });
 
@@ -441,8 +532,19 @@ app.get('/generate/:type', async (req, res) => {
         maxSendable: maxSendableValue,
         commentAllowed: commentAllowedValue
       });
+    } else if (type === 'channel') {
+      const channelUrl = `${DOMAIN}/channel`;
+      lnurl = encode(channelUrl);
+      qrCode = await QRCode.toDataURL(lnurl);
+
+      res.json({
+        url: channelUrl,
+        lnurl,
+        qrCode,
+        type: 'channel'
+      });
     } else {
-      res.status(400).json({ error: 'Invalid type. Use "withdraw" or "pay"' });
+      res.status(400).json({ error: 'Invalid type. Use "withdraw", "pay", or "channel"' });
     }
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -601,6 +703,31 @@ app.get('/withdrawals', async (req, res) => {
           amount_sats: w.amount_sats,
           used: Boolean(w.used),
           created_at: w.created_at
+        }))
+      });
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// List all channel requests endpoint
+app.get('/channels', async (req, res) => {
+  try {
+    db.all('SELECT * FROM channel_requests ORDER BY created_at DESC', [], (err, channels) => {
+      if (err) {
+        return res.status(500).json({ error: 'Database error' });
+      }
+
+      res.json({
+        channels: channels.map(c => ({
+          id: c.id,
+          k1: c.k1,
+          remote_id: c.remote_id,
+          private: Boolean(c.private),
+          cancelled: Boolean(c.cancelled),
+          completed: Boolean(c.completed),
+          created_at: c.created_at
         }))
       });
     });

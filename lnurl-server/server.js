@@ -230,7 +230,7 @@ app.get('/withdraw', async (req, res) => {
     // Store withdrawal request
     db.run(
       'INSERT INTO withdrawals (id, k1, amount_sats) VALUES (?, ?, ?)',
-      [withdrawId, k1, 10000] // Default 10,000 sats
+      [withdrawId, k1, 0] // Amount will be set when client sends invoice
     );
 
     const withdrawUrl = `${DOMAIN}/withdraw/callback?k1=${k1}`;
@@ -253,18 +253,43 @@ app.get('/withdraw/callback', async (req, res) => {
   try {
     const { k1, pr } = req.query;
 
-    // Verify k1 exists and hasn't been used
-    db.get('SELECT * FROM withdrawals WHERE k1 = ? AND used = 0', [k1], async (err, row) => {
+    // Verify k1 exists and hasn't been used, and get withdrawal config
+    db.get(`
+      SELECT w.*, wc.min_withdrawable, wc.max_withdrawable, wc.default_description 
+      FROM withdrawals w 
+      LEFT JOIN withdrawal_configs wc ON w.k1 = wc.k1 
+      WHERE w.k1 = ? AND w.used = 0
+    `, [k1], async (err, row) => {
       if (err || !row) {
         return res.json({ status: 'ERROR', reason: 'Invalid or used k1' });
       }
 
       try {
-        // Pay the invoice using our LND method
-        await callLND('channels/transactions', { payment_request: pr });
+        // Decode the invoice to get the amount
+        const decodedInvoice = await lndREST(`/v1/payreq/${pr}`, 'GET');
+        const invoiceAmountSats = decodedInvoice.num_satoshis;
 
-        // Mark as used
-        db.run('UPDATE withdrawals SET used = 1 WHERE k1 = ?', [k1]);
+        console.log(`Processing withdrawal: k1=${k1}, amount=${invoiceAmountSats} sats`);
+
+        // Get configuration values (use defaults if not set)
+        const minWithdrawable = row.min_withdrawable || 1000;
+        const maxWithdrawable = row.max_withdrawable || 100000000;
+
+        // Validate amount is within configured limits
+        if (invoiceAmountSats < minWithdrawable || invoiceAmountSats > maxWithdrawable) {
+          return res.json({
+            status: 'ERROR',
+            reason: `Amount out of range (${minWithdrawable} - ${maxWithdrawable} sats)`
+          });
+        }
+
+        // Pay the invoice using our LND method
+        await lndREST('/v1/channels/transactions', 'POST', { payment_request: pr });
+
+        // Update withdrawal with actual amount and mark as used
+        db.run('UPDATE withdrawals SET used = 1, amount_sats = ? WHERE k1 = ?', [invoiceAmountSats, k1]);
+
+        console.log(`✅ Withdrawal completed: k1=${k1}, amount=${invoiceAmountSats} sats`);
 
         res.json({ status: 'OK' });
       } catch (error) {
@@ -362,12 +387,10 @@ app.get('/pay/:paymentId/callback', async (req, res) => {
 app.get('/generate/:type', async (req, res) => {
   try {
     const { type } = req.params;
-    const { minSendable, maxSendable, commentAllowed } = req.query;
     let url, lnurl, qrCode;
 
     if (type === 'withdraw') {
-      url = `${DOMAIN}/withdraw`;
-      lnurl = encode(url);
+      lnurl = encode(`${DOMAIN}/withdraw`);
       qrCode = await QRCode.toDataURL(lnurl);
 
       res.json({
@@ -377,6 +400,7 @@ app.get('/generate/:type', async (req, res) => {
         type: 'withdraw'
       });
     } else if (type === 'pay') {
+      const { minSendable, maxSendable, commentAllowed } = req.query;
       const paymentId = crypto.randomBytes(16).toString('hex');
 
       // Store payment configuration in database
@@ -554,6 +578,29 @@ app.get('/payments', async (req, res) => {
           comment: p.comment,
           paid: Boolean(p.paid),
           created_at: p.created_at
+        }))
+      });
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// List all withdrawals endpoint
+app.get('/withdrawals', async (req, res) => {
+  try {
+    db.all('SELECT * FROM withdrawals ORDER BY created_at DESC', [], (err, withdrawals) => {
+      if (err) {
+        return res.status(500).json({ error: 'Database error' });
+      }
+
+      res.json({
+        withdrawals: withdrawals.map(w => ({
+          id: w.id,
+          k1: w.k1,
+          amount_sats: w.amount_sats,
+          used: Boolean(w.used),
+          created_at: w.created_at
         }))
       });
     });

@@ -1,4 +1,4 @@
-# Synonym Docker - Bitcoin & Lightning Development Environment
+# Bitkit Docker - Bitcoin & Lightning Development Environment
 
 A complete Docker-based development environment for Bitcoin and Lightning Network development, featuring a LNURL server for Lightning payments.
 
@@ -15,7 +15,7 @@ A complete Docker-based development environment for Bitcoin and Lightning Networ
 1. **Clone and start the services:**
    ```bash
    git clone <repository-url>
-   cd synonym-docker
+   cd bitkit-docker
    docker-compose up -d
    ```
 
@@ -85,7 +85,7 @@ curl http://localhost:3000/.well-known/lnurlp/alice
 
 ### Adding Blocks (for testing)
 ```bash
-docker-compose exec bitcoind bitcoin-cli -rpcconnect=127.0.0.1 -rpcport=43782 -rpcuser=polaruser -rpcpassword=polarpass generate 1
+./bitcoin-cli mine 1
 ```
 
 ### LND CLI
@@ -136,23 +136,17 @@ Key environment variables in `docker-compose.yml`:
 2. Check RPC authentication credentials
 3. Verify port mappings
 
+### Nuke databases
+1. Run `docker compose down --volumes`
+2. Delete databases: `rm -rf ./lnd ./lnurl-server/data`
+
 ## Security Notes
 
 - This setup uses **regtest** network for development
 - Self-signed certificates are used for LND REST API
-- Default credentials are used (change for production)
+- Default credentials are used
 - All services are exposed on localhost only
 
 ## Production Considerations
 
-For production deployment:
-1. Use mainnet/testnet instead of regtest
-2. Change default passwords and credentials
-3. Use proper SSL certificates
-4. Implement proper backup strategies
-5. Add monitoring and logging
-6. Use secrets management for sensitive data
-
-## License
-
-[Add your license here] 
+Do not use for production. LNURL server is vibe-coded and not fully spec compliant.

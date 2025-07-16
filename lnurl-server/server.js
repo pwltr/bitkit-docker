@@ -44,6 +44,16 @@ db.serialize(() => {
     description TEXT,
     payment_hash TEXT,
     paid BOOLEAN DEFAULT 0,
+    comment TEXT,
+    comment_allowed INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  db.run(`CREATE TABLE IF NOT EXISTS payment_configs (
+    payment_id TEXT PRIMARY KEY,
+    min_sendable INTEGER DEFAULT 1000,
+    max_sendable INTEGER DEFAULT 1000000000,
+    comment_allowed INTEGER DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
 });
@@ -251,7 +261,7 @@ app.get('/withdraw/callback', async (req, res) => {
 
       try {
         // Pay the invoice using our LND method
-        const payResult = await callLND('channels/transactions', { payment_request: pr });
+        await callLND('channels/transactions', { payment_request: pr });
 
         // Mark as used
         db.run('UPDATE withdrawals SET used = 1 WHERE k1 = ?', [k1]);
@@ -272,16 +282,28 @@ app.get('/pay/:paymentId', async (req, res) => {
   try {
     const { paymentId } = req.params;
 
-    const metadata = JSON.stringify([
-      ['text/plain', `Payment for ${paymentId}`]
-    ]);
+    // Get payment configuration from database
+    db.get('SELECT * FROM payment_configs WHERE payment_id = ?', [paymentId], (err, config) => {
+      if (err) {
+        return res.status(500).json({ status: 'ERROR', reason: 'Database error' });
+      }
 
-    res.json({
-      tag: 'payRequest',
-      callback: `${DOMAIN}/pay/${paymentId}/callback`,
-      minSendable: 1000, // 1 sat minimum (in millisats)
-      maxSendable: 1000000000, // 1,000,000 sats maximum (in millisats)
-      metadata: metadata
+      if (!config) {
+        return res.status(404).json({ status: 'ERROR', reason: 'Payment configuration not found' });
+      }
+
+      const metadata = JSON.stringify([
+        ['text/plain', `Payment for ${paymentId}`]
+      ]);
+
+      res.json({
+        tag: 'payRequest',
+        callback: `${DOMAIN}/pay/${paymentId}/callback`,
+        minSendable: config.min_sendable,
+        maxSendable: config.max_sendable,
+        metadata: metadata,
+        commentAllowed: config.comment_allowed
+      });
     });
   } catch (error) {
     res.status(500).json({ status: 'ERROR', reason: error.message });
@@ -291,34 +313,48 @@ app.get('/pay/:paymentId', async (req, res) => {
 // LNURL-pay callback
 app.get('/pay/:paymentId/callback', async (req, res) => {
   try {
-    const { amount } = req.query;
+    const { amount, comment } = req.query;
     const { paymentId } = req.params;
     const amountMsat = parseInt(amount);
     const amountSats = Math.floor(amountMsat / 1000);
 
     // Create invoice using our LND method
     const invoice = await callLND('invoices', {
-      value_msat: amountMsat,
-      memo: `LNURL Payment ${paymentId}`,
-      expiry: '3600'
+      value: amountSats,
+      memo: comment ? `LNURL Payment ${paymentId} - ${comment}` : `LNURL Payment ${paymentId}`,
+      expiry: 3600
     });
+
+    // Extract the payment hash in hex
+    let paymentHashHex = '';
+    if (invoice.r_hash_str) {
+      paymentHashHex = invoice.r_hash_str;
+    } else if (invoice.r_hash) {
+      // Convert base64 to hex
+      paymentHashHex = Buffer.from(invoice.r_hash, 'base64').toString('hex');
+    } else if (invoice.payment_hash) {
+      paymentHashHex = invoice.payment_hash;
+    }
 
     // Generate unique payment record ID (different from paymentId used in URL)
     const uniquePaymentId = crypto.randomBytes(16).toString('hex');
 
     // Store payment info
     db.run(
-      'INSERT INTO payments (id, amount_sats, payment_hash, description) VALUES (?, ?, ?, ?)',
-      [uniquePaymentId, amountSats, invoice.payment_hash, `LNURL Payment ${paymentId}`]
+      'INSERT INTO payments (id, amount_sats, payment_hash, description, comment) VALUES (?, ?, ?, ?, ?)',
+      [uniquePaymentId, amountSats, paymentHashHex, `LNURL Payment ${paymentId}`, comment || null]
     );
 
     res.json({
-      pr: invoice.bolt11,
+      pr: invoice.payment_request,
       routes: []
     });
   } catch (error) {
     console.error('Invoice creation error:', error);
-    res.json({ status: 'ERROR', reason: 'Invoice creation failed: ' + error.message });
+    res.status(500).json({
+      status: 'ERROR',
+      reason: 'Invoice creation failed: ' + error.message
+    });
   }
 });
 
@@ -326,6 +362,7 @@ app.get('/pay/:paymentId/callback', async (req, res) => {
 app.get('/generate/:type', async (req, res) => {
   try {
     const { type } = req.params;
+    const { minSendable, maxSendable, commentAllowed } = req.query;
     let url, lnurl, qrCode;
 
     if (type === 'withdraw') {
@@ -341,16 +378,44 @@ app.get('/generate/:type', async (req, res) => {
       });
     } else if (type === 'pay') {
       const paymentId = crypto.randomBytes(16).toString('hex');
-      url = `${DOMAIN}/pay/${paymentId}`;
-      lnurl = encode(url);
+
+      // Store payment configuration in database
+      const minSendableValue = minSendable ? parseInt(minSendable) : 1000;
+      const maxSendableValue = maxSendable ? parseInt(maxSendable) : 1000000000;
+      const commentAllowedValue = commentAllowed ? parseInt(commentAllowed) : 255;
+
+      // Use a promise to ensure the database operation completes
+      await new Promise((resolve, reject) => {
+        db.run(
+          'INSERT INTO payment_configs (payment_id, min_sendable, max_sendable, comment_allowed) VALUES (?, ?, ?, ?)',
+          [paymentId, minSendableValue, maxSendableValue, commentAllowedValue],
+          function (err) {
+            if (err) {
+              console.error('Database insert error:', err);
+              reject(err);
+            } else {
+              console.log(`Stored payment config for ${paymentId}: commentAllowed=${commentAllowedValue}`);
+              resolve();
+            }
+          }
+        );
+      });
+
+      // Build URL (no query parameters needed since config is in DB)
+      const paymentUrl = `${DOMAIN}/pay/${paymentId}`;
+
+      lnurl = encode(paymentUrl);
       qrCode = await QRCode.toDataURL(lnurl);
 
       res.json({
-        url,
+        url: paymentUrl,
         lnurl,
         qrCode,
         paymentId,
-        type: 'pay'
+        type: 'pay',
+        minSendable: minSendableValue,
+        maxSendable: maxSendableValue,
+        commentAllowed: commentAllowedValue
       });
     } else {
       res.status(400).json({ error: 'Invalid type. Use "withdraw" or "pay"' });
@@ -375,13 +440,126 @@ app.get('/.well-known/lnurlp/:username', async (req, res) => {
 
   const paymentId = crypto.createHash('sha256').update(username).digest('hex');
 
+  // Store or update payment configuration for this Lightning Address
+  await new Promise((resolve, reject) => {
+    db.run(
+      'INSERT OR REPLACE INTO payment_configs (payment_id, min_sendable, max_sendable, comment_allowed) VALUES (?, ?, ?, ?)',
+      [paymentId, 1000, 1000000000, 100],
+      function (err) {
+        if (err) {
+          console.error('Database insert error:', err);
+          reject(err);
+        } else {
+          console.log(`Stored Lightning Address config for ${username}: commentAllowed=100`);
+          resolve();
+        }
+      }
+    );
+  });
+
   res.json({
     tag: 'payRequest',
     callback: `${DOMAIN}/pay/${paymentId}/callback`,
     minSendable: 1000, // 1 sat (in msats)
     maxSendable: 1000000000, // 1M sats (in msats)
-    metadata
+    metadata,
+    commentAllowed: 255 // Allow comments up to 255 characters
   });
+});
+
+// Check payment status endpoint
+app.get('/payment/:paymentId/status', async (req, res) => {
+  try {
+    const { paymentId } = req.params;
+
+    // Get payment from database
+    db.get('SELECT * FROM payments WHERE id = ?', [paymentId], async (err, payment) => {
+      if (err) {
+        return res.status(500).json({ error: 'Database error' });
+      }
+
+      if (!payment) {
+        return res.status(404).json({ error: 'Payment not found' });
+      }
+
+      // If already marked as paid, return status
+      if (payment.paid) {
+        return res.json({
+          paymentId,
+          paid: true,
+          amount_sats: payment.amount_sats,
+          description: payment.description,
+          comment: payment.comment,
+          created_at: payment.created_at
+        });
+      }
+
+      // Check with LND if invoice is settled
+      try {
+        const invoice = await lndREST(`/v1/invoice/${payment.payment_hash}`, 'GET');
+
+        if (invoice.settled) {
+          db.run('UPDATE payments SET paid = 1 WHERE id = ?', [paymentId]);
+
+          res.json({
+            paymentId,
+            paid: true,
+            amount_sats: payment.amount_sats,
+            description: payment.description,
+            comment: payment.comment,
+            created_at: payment.created_at,
+            settled_at: new Date().toISOString()
+          });
+        } else {
+          res.json({
+            paymentId,
+            paid: false,
+            amount_sats: payment.amount_sats,
+            description: payment.description,
+            comment: payment.comment,
+            created_at: payment.created_at
+          });
+        }
+      } catch (lndError) {
+        console.error('Error checking invoice status:', lndError);
+        res.json({
+          paymentId,
+          paid: false,
+          amount_sats: payment.amount_sats,
+          description: payment.description,
+          comment: payment.comment,
+          created_at: payment.created_at,
+          error: 'Could not verify payment status'
+        });
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// List all payments endpoint
+app.get('/payments', async (req, res) => {
+  try {
+    db.all('SELECT * FROM payments ORDER BY created_at DESC', [], (err, payments) => {
+      if (err) {
+        return res.status(500).json({ error: 'Database error' });
+      }
+
+      res.json({
+        payments: payments.map(p => ({
+          id: p.id,
+          amount_sats: p.amount_sats,
+          description: p.description,
+          comment: p.comment,
+          paid: Boolean(p.paid),
+          created_at: p.created_at
+        }))
+      });
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // Health check endpoint
@@ -405,6 +583,34 @@ app.get('/health', async (req, res) => {
   }
 });
 
+// Background job to check for settled invoices
+async function checkSettledInvoices() {
+  try {
+    // Get all unpaid payments
+    db.all('SELECT * FROM payments WHERE paid = 0', [], async (err, payments) => {
+      if (err) {
+        console.error('Error fetching unpaid payments:', err);
+        return;
+      }
+
+      for (const payment of payments) {
+        try {
+          const invoice = await lndREST(`/v1/invoice/${payment.payment_hash}`, 'GET');
+
+          if (invoice.settled) {
+            db.run('UPDATE payments SET paid = 1 WHERE id = ?', [payment.id]);
+            console.log(`✅ Payment ${payment.id} marked as paid (${payment.amount_sats} sats)`);
+          }
+        } catch (error) {
+          console.error(`Error checking payment ${payment.id}:`, error.message);
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Error in checkSettledInvoices:', error);
+  }
+}
+
 // Start server
 app.listen(PORT, async () => {
   console.log(`🚀 LNURL server starting on port ${PORT}`);
@@ -421,5 +627,9 @@ app.listen(PORT, async () => {
   setTimeout(async () => {
     console.log('🔍 Checking connections...');
     await checkConnections();
+
+    // Start background job to check for settled invoices every 30 seconds
+    setInterval(checkSettledInvoices, 10000);
+    console.log('🔄 Started background payment monitoring (every 30 seconds)');
   }, 5000);
 });

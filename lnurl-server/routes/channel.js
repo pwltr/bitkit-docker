@@ -59,7 +59,23 @@ router.get('/callback', asyncHandler(async (req, res) => {
 
     Logger.channel('initiated', { k1, remoteid, private: privateFlag });
 
-    // The wallet should now wait for an incoming OpenChannel message from our node
+    try {
+        // Open channel to the remote node
+        const channelAmount = config.limits.defaultChannelAmount;
+        await lndService.openChannel(remoteid, channelAmount, privateFlag);
+
+        Logger.channel('opening', { k1, remoteid, amount: channelAmount, private: privateFlag });
+
+        // Mark channel request as completed
+        await db.completeChannelRequest(k1);
+
+        Logger.channel('completed', { k1, remoteid });
+    } catch (error) {
+        Logger.error('Channel opening failed', error);
+        // Don't fail the callback, just log the error
+        // The wallet will retry or handle the failure
+    }
+
     res.json({ status: 'OK' });
 }));
 

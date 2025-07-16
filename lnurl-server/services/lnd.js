@@ -140,6 +140,40 @@ class LNDService {
             throw error;
         }
     }
+
+    async openChannel(nodePubkey, localFundingAmount, privateChannel = false) {
+        try {
+            const response = await this.rest('/v1/channels', 'POST', {
+                node_pubkey_string: nodePubkey,
+                local_funding_amount: localFundingAmount.toString(),
+                private: privateChannel
+            });
+
+            console.log('Channel opening initiated:', response);
+            return response;
+        } catch (error) {
+            console.error('Failed to open channel:', error.message);
+            throw error;
+        }
+    }
+
+    async getPendingChannels() {
+        try {
+            return await this.rest('/v1/channels/pending', 'GET');
+        } catch (error) {
+            console.error('Failed to get pending channels:', error.message);
+            throw error;
+        }
+    }
+
+    async getChannels() {
+        try {
+            return await this.rest('/v1/channels', 'GET');
+        } catch (error) {
+            console.error('Failed to get channels:', error.message);
+            throw error;
+        }
+    }
 }
 
 module.exports = new LNDService();

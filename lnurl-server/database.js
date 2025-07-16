@@ -180,6 +180,13 @@ class Database {
         );
     }
 
+    async completeChannelRequest(k1) {
+        return this.run(
+            'UPDATE channel_requests SET completed = 1 WHERE k1 = ?',
+            [k1]
+        );
+    }
+
     async getAllChannelRequests() {
         return this.all('SELECT * FROM channel_requests ORDER BY created_at DESC');
     }

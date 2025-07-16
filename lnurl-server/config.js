@@ -34,7 +34,8 @@ const config = {
         maxSendable: 1000000000, // 1M sats maximum
         commentAllowed: 255, // Max comment length
         k1Length: 32, // k1 random bytes length
-        idLength: 16 // ID random bytes length
+        idLength: 16, // ID random bytes length
+        defaultChannelAmount: 100000 // 100,000 sats default channel size
     },
 
     // Background job intervals

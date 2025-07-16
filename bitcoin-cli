@@ -22,7 +22,7 @@ Flags:
 Commands:
     fund <amount>                      Fund the wallet
     mine <amount> [--auto]             Generate a number of blocks
-    send <address> <amount>            Send to address or BIP21 URI
+    send [amount] [address]            Send to address or BIP21 URI (prompts for missing parameters)
     getInvoice <amount>                Get a new BIP21 URI with a bech32 address
 EOF
 }
@@ -96,14 +96,15 @@ if [[ "$command" = "send" ]]; then
   if [ -z ${1+x} ]; then
     read -p "Enter a BIP21 URI or address: " uri
     echo
-  else
-    uri="$1"
-  fi
-
-  if [ -z ${2+x} ]; then
     amount=$DEFAULT_AMOUNT
   else
-    amount="$2"
+    amount="$1"
+    if [ -z ${2+x} ]; then
+      read -p "Enter a BIP21 URI or address: " uri
+      echo
+    else
+      uri="$2"
+    fi
   fi
 
   protocol=$(echo "${uri%%:*}")

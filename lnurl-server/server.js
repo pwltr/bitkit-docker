@@ -13,6 +13,7 @@ const channelRoutes = require('./routes/channel');
 const payRoutes = require('./routes/pay');
 const adminRoutes = require('./routes/admin');
 const generateRoutes = require('./routes/generate');
+const wellKnownRoutes = require('./routes/well-known');
 
 // Create Express app
 const app = express();
@@ -35,6 +36,7 @@ app.use('/withdraw', withdrawRoutes);
 app.use('/channel', channelRoutes);
 app.use('/pay', payRoutes);
 app.use('/', adminRoutes); // Health check and monitoring endpoints
+app.use('/', wellKnownRoutes);
 app.use('/generate', generateRoutes);
 
 // Error handling middleware (must be last)

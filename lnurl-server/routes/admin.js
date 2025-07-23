@@ -133,6 +133,12 @@ router.get('/payment/:paymentId/status', asyncHandler(async (req, res) => {
     }
 }));
 
+// Get new LND address for funding
+router.get('/address', asyncHandler(async (req, res) => {
+    const addressInfo = await lndService.getNewAddress();
+    res.json(addressInfo);
+}));
+
 // Helper function to check connections
 async function checkConnections() {
     const result = { bitcoin: false, lnd: false, error: null, blockHeight: null, nodeInfo: null };

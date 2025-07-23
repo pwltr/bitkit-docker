@@ -135,6 +135,23 @@ docker-compose logs -f bitcoind
 - `http://localhost:3000/.well-known/lnurlp/alice`
 - copy the email-like lightning address and paste into app
 
+#### LNURL Channel
+- setup `docker-compose.yml`
+  - change `DOMAIN` to `http://__YOUR_NETWORK_IP__:3000`
+  - set lnd's `--externalip=127.0.0.1` to `--externalip=__YOUR_NETWORK_IP__`
+- reset old docker data
+  - `docker compose down --volumes`
+  - `rm -rf ./lnd ./lnurl-server/data`
+- `docker compose up --build`
+- mine blocks: `./bitcoin-cli mine 101`
+- fund LND wallet:
+  - get address: `curl -s http://localhost:3000/address | jq -r .address`
+  - fund LND wallet: `./bitcoin-cli send 0.2`
+  - mine block `./bitcoin-cli mine 1`
+- generate LNURL channel: `http://localhost:3000/channel`
+- paste lnurl into app and complete the flow
+- mine blocks: `./bitcoin-cli mine 6`
+
 ## Configuration
 
 ### Environment Variables
@@ -170,6 +187,14 @@ Key environment variables in `docker-compose.yml`:
 ### Nuke databases
 1. Run `docker compose down --volumes`
 2. Delete databases: `rm -rf ./lnd ./lnurl-server/data`
+
+### LNURL issues
+1. Check latest logs snapshot: `docker logs lnurl-server --tail 10`
+2. Check live logs: `docker-compose logs -f lnurl-server`
+3. Check LND wallet balance:
+```sh
+docker exec lnd lncli --network=regtest --tlscertpath=/home/lnd/.lnd/tls.cert --macaroonpath=/home/lnd/.lnd/data/chain/bitcoin/regtest/admin.macaroon walletbalance
+```
 
 ## Security Notes
 

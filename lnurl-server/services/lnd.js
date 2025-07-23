@@ -141,6 +141,15 @@ class LNDService {
         }
     }
 
+    async getNewAddress() {
+        try {
+            return await this.rest('/v1/newaddress', 'GET');
+        } catch (error) {
+            console.error('Failed to get new address:', error.message);
+            throw error;
+        }
+    }
+
     async openChannel(nodePubkey, localFundingAmount, privateChannel = false) {
         try {
             const response = await this.rest('/v1/channels', 'POST', {

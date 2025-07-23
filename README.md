@@ -104,6 +104,37 @@ docker-compose logs -f lnd
 docker-compose logs -f bitcoind
 ```
 
+### Bitkit Testing
+
+#### Bech32 LNURL Pay
+- checkout this repo locally
+- in `Env.kt`, change `ElectrumServers.REGTEST` to
+  ```
+  host = "__YOUR_NETWORK_IP__",
+  tcp = 60001,
+  ```
+- uninstall old app and install fresh one
+- set DOMAIN in `docker-compose.yml` to `http://__YOUR_NETWORK_IP__:3000`
+- run `docker compose up --build`
+- mine blocks: `./bitcoin-cli mine 101`
+- fund onchain wallet: `./bitcoin-cli send`
+- mine block: `./bitcoin-cli mine 1`
+- get local LND nodeID and open channel
+	- `http://localhost:3000/health`
+	- get nodeID from `lnd_info.uris` array, replace `127.0.0.1` with `__YOUR_NETWORK_IP__` and paste into app, then complete the flow
+	- `./bitcoin-cli mine 3`
+- generate LNURL pay: `http://localhost:3000/generate/pay`
+- paste lnurl into app
+- generate fixed amount LNURL pay (QuickPay): `http://localhost:3000/generate/pay?minSendable=10000&maxSendable=10000`
+
+#### Lightning Address
+- `ngrok http 3000`
+- change `DOMAIN` in `docker-compose.yml` to `__NGROK_URL__`
+- `docker compose down` if running
+- `docker compose up --build`
+- `http://localhost:3000/.well-known/lnurlp/alice`
+- copy the email-like lightning address and paste into app
+
 ## Configuration
 
 ### Environment Variables

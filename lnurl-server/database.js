@@ -49,6 +49,22 @@ class Database {
                 completed BOOLEAN DEFAULT 0,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )`);
+
+            // Auth challenges table
+            this.db.run(`CREATE TABLE IF NOT EXISTS auth_challenges (
+                k1 TEXT PRIMARY KEY,
+                action TEXT DEFAULT 'login',
+                used BOOLEAN DEFAULT 0,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )`);
+
+            // Auth sessions table
+            this.db.run(`CREATE TABLE IF NOT EXISTS auth_sessions (
+                id TEXT PRIMARY KEY,
+                linking_key TEXT,
+                action TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )`);
         });
     }
 
@@ -189,6 +205,63 @@ class Database {
 
     async getAllChannelRequests() {
         return this.all('SELECT * FROM channel_requests ORDER BY created_at DESC');
+    }
+
+    // Auth operations
+    async createAuthChallenge(k1, action = 'login') {
+        return this.run(
+            'INSERT INTO auth_challenges (k1, action) VALUES (?, ?)',
+            [k1, action]
+        );
+    }
+
+    async getAuthChallenge(k1) {
+        return this.get(
+            'SELECT * FROM auth_challenges WHERE k1 = ? AND used = 0',
+            [k1]
+        );
+    }
+
+    async useAuthChallenge(k1) {
+        return this.run(
+            'UPDATE auth_challenges SET used = 1 WHERE k1 = ?',
+            [k1]
+        );
+    }
+
+    async createAuthSession(id, linkingKey, action) {
+        return this.run(
+            'INSERT INTO auth_sessions (id, linking_key, action) VALUES (?, ?, ?)',
+            [id, linkingKey, action]
+        );
+    }
+
+    async getAuthSession(id) {
+        return this.get('SELECT * FROM auth_sessions WHERE id = ?', [id]);
+    }
+
+    async getAuthSessionByLinkingKey(linkingKey) {
+        return this.get('SELECT * FROM auth_sessions WHERE linking_key = ?', [linkingKey]);
+    }
+
+    async deleteAuthSession(id) {
+        return this.run('DELETE FROM auth_sessions WHERE id = ?', [id]);
+    }
+
+    async cleanupExpiredAuthChallenges() {
+        const expiryTime = new Date(Date.now() - config.auth.k1Expiry).toISOString();
+        return this.run(
+            'DELETE FROM auth_challenges WHERE created_at < ?',
+            [expiryTime]
+        );
+    }
+
+    async cleanupExpiredAuthSessions() {
+        const expiryTime = new Date(Date.now() - config.auth.sessionExpiry).toISOString();
+        return this.run(
+            'DELETE FROM auth_sessions WHERE created_at < ?',
+            [expiryTime]
+        );
     }
 
     close() {

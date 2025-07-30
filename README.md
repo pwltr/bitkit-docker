@@ -46,12 +46,16 @@ A complete Docker-based development environment for Bitcoin and Lightning Networ
 - **Features**: 
   - LNURL-withdraw
   - LNURL-pay
+  - LNURL-channel
+  - LNURL-auth
   - Lightning Address support
   - QR code generation
 - **Endpoints**:
   - `/health` - Service health check
   - `/generate/withdraw` - Generate LNURL-withdraw
   - `/generate/pay` - Generate LNURL-pay
+  - `/generate/channel` - Generate LNURL-channel
+  - `/auth` - LNURL-auth challenge and verification
   - `/.well-known/lnurlp/:username` - Lightning Address
 
 ### Electrum Server
@@ -69,6 +73,26 @@ curl http://localhost:3000/generate/withdraw
 ### Generate LNURL-pay
 ```bash
 curl http://localhost:3000/generate/pay
+```
+
+### Generate LNURL-channel
+```bash
+curl http://localhost:3000/generate/channel
+```
+
+### LNURL-auth
+```bash
+# Generate auth challenge (returns encoded LNURL)
+curl http://localhost:3000/auth?action=login
+
+# Generate auth challenge with QR code (returns encoded LNURL + QR)
+curl http://localhost:3000/auth/qr?action=login
+
+# Verify signature (wallet does this automatically)
+curl "http://localhost:3000/auth?k1=<challenge>&sig=<signature>&key=<public_key>"
+
+# Check auth sessions
+curl http://localhost:3000/auth/sessions
 ```
 
 ### Check Health

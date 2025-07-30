@@ -38,6 +38,13 @@ const config = {
         defaultChannelAmount: 100000 // 100,000 sats default channel size
     },
 
+    // Auth configuration
+    auth: {
+        k1Expiry: 300000, // 5 minutes in milliseconds
+        sessionExpiry: 3600000, // 1 hour in milliseconds
+        cleanupInterval: 60000 // 1 minute cleanup interval
+    },
+
     // Background job intervals
     intervals: {
         paymentCheck: 10000 // 10 seconds

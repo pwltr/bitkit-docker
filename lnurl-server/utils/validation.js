@@ -63,6 +63,25 @@ class Validation {
         return value === '0' || value === '1' || value === true || value === false;
     }
 
+    // Validate hex string with optional length
+    static validateHexString(hex, expectedLength = null) {
+        if (!hex || typeof hex !== 'string') {
+            return false;
+        }
+
+        // Check if it's a valid hex string
+        if (!/^[a-fA-F0-9]+$/.test(hex)) {
+            return false;
+        }
+
+        // Check length if specified
+        if (expectedLength && hex.length !== expectedLength) {
+            return false;
+        }
+
+        return true;
+    }
+
     // Generate random k1
     static generateK1() {
         return crypto.randomBytes(config.limits.k1Length).toString('hex');
@@ -128,3 +147,18 @@ class Validation {
 }
 
 module.exports = Validation;
+
+// Export individual functions for convenience
+module.exports.validateHexString = Validation.validateHexString;
+module.exports.isValidK1 = Validation.isValidK1;
+module.exports.isValidPaymentRequest = Validation.isValidPaymentRequest;
+module.exports.isValidAmount = Validation.isValidAmount;
+module.exports.isValidRemoteId = Validation.isValidRemoteId;
+module.exports.isValidPaymentId = Validation.isValidPaymentId;
+module.exports.isValidComment = Validation.isValidComment;
+module.exports.isValidBoolean = Validation.isValidBoolean;
+module.exports.generateK1 = Validation.generateK1;
+module.exports.generateId = Validation.generateId;
+module.exports.validateChannelRequest = Validation.validateChannelRequest;
+module.exports.validateWithdrawCallback = Validation.validateWithdrawCallback;
+module.exports.validatePayCallback = Validation.validatePayCallback;

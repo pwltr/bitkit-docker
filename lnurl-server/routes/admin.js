@@ -71,6 +71,34 @@ router.get('/channels', asyncHandler(async (req, res) => {
     });
 }));
 
+// List all auth challenges endpoint
+router.get('/auth/challenges', asyncHandler(async (req, res) => {
+    const challenges = await db.all('SELECT * FROM auth_challenges ORDER BY created_at DESC');
+
+    res.json({
+        challenges: challenges.map(c => ({
+            k1: c.k1,
+            action: c.action,
+            used: Boolean(c.used),
+            created_at: c.created_at
+        }))
+    });
+}));
+
+// List all auth sessions endpoint
+router.get('/auth/sessions', asyncHandler(async (req, res) => {
+    const sessions = await db.all('SELECT * FROM auth_sessions ORDER BY created_at DESC');
+
+    res.json({
+        sessions: sessions.map(s => ({
+            id: s.id,
+            linking_key: s.linking_key,
+            action: s.action,
+            created_at: s.created_at
+        }))
+    });
+}));
+
 // Check payment status endpoint
 router.get('/payment/:paymentId/status', asyncHandler(async (req, res) => {
     const { paymentId } = req.params;
